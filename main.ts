@@ -59,6 +59,7 @@ await new Command()
 
     const s3client = new S3Client([
       {
+        bucketEndpoint: bucket,
         region,
         credentials: {
           accessKeyId: accessKey,

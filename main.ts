@@ -4,12 +4,14 @@ import * as ini from "https://deno.land/x/ini@v2.1.0/ini.ts";
 // import { S3Client } from "https://deno.land/x/s3_lite_client@0.7.0/mod.ts";
 import { join } from "https://deno.land/std@0.221.0/path/mod.ts";
 import { sha256 } from "https://denopkg.com/chiefbiiko/sha256@v1.0.0/mod.ts";
+import { walk } from "https://deno.land/std@0.221.0/fs/walk.ts";
 
 import {
   S3Client,
   HeadObjectCommand,
   ListObjectsV2Command,
   ListObjectsV2CommandOutput,
+  ObjectStorageClass,
 } from "npm:@aws-sdk/client-s3";
 
 import { Command } from "https://deno.land/x/cliffy@v1.0.0-rc.3/command/mod.ts";
@@ -29,6 +31,7 @@ await new Command()
   .option("-j, --json", "Output the JSON details to stdout when finished.")
   .arguments("<bucket:string> <dir:string>")
   .action(async ({ prefix, verbose, json }, bucket, dir) => {
+    const dirWithPrefix = prefix ? join(dir, prefix) : dir;
     let accessKey;
     let secretKey;
 
@@ -96,6 +99,28 @@ await new Command()
     };
 
     const objs = await listObjs();
+    const localWalk = await walk(dirWithPrefix, { includeDirs: false });
+    const localFiles: string[] = [];
+    for await (const entry of localWalk) {
+      const path = entry.path.slice(dir.length);
+      localFiles.push(path);
+    }
+
+    const matches: string[] = [];
+    const mismatches: string[] = [];
+    const missing_locally: string[] = [];
+    const missing_on_s3: string[] = [];
+
+    console.error(`Scanning local files...`);
+    for (const path of localFiles) {
+      if (!objs.find((x) => x.Key == path)) {
+        console.error(
+          `    Error: file found locally that is not on S3: ${path}`
+        );
+        missing_on_s3.push(path);
+      }
+    }
+    console.log(`Done scanning local files: ${localFiles.length} files total.`);
 
     console.error("Fetching object checksums...");
     const sumResults = await Promise.all(
@@ -130,9 +155,6 @@ await new Command()
     console.error("Fetch object sums complete.");
 
     console.error("Calculating and comparing checksums...");
-    const matches: string[] = [];
-    const missing: string[] = [];
-    const mismatches: string[] = [];
     await Promise.all(
       sums.map(({ key, sum }) =>
         (async () => {
@@ -142,8 +164,8 @@ await new Command()
           try {
             await Deno.stat(path);
           } catch (_) {
-            console.error(`File on S3 doesn't exist locally: ${key}`);
-            missing.push(key);
+            console.error(`    File on S3 doesn't exist locally: ${key}`);
+            missing_locally.push(key);
             return;
           }
 
@@ -168,10 +190,17 @@ await new Command()
     console.error(`    Total     : ${sums.length}`);
     console.error(`    Matches   : ${matches.length}`);
     console.error(`    Mismatches: ${mismatches.length}`);
-    console.error(`    Missing   : ${missing.length}`);
+    console.error(`    Missing Locally: ${missing_locally.length}`);
+    console.error(`    Missing on S3  : ${missing_on_s3.length}`);
 
     if (json) {
-      console.log(JSON.stringify({ matches, missing, mismatches }, null, 2));
+      console.log(
+        JSON.stringify(
+          { matches, missing_locally, missing_on_s3, mismatches },
+          null,
+          2
+        )
+      );
     }
   })
   .parse(Deno.args);

@@ -104,7 +104,7 @@ await new Command()
     const localWalk = await walk(dirWithPrefix, { includeDirs: false });
     const localFiles: string[] = [];
     for await (const entry of localWalk) {
-      const path = entry.path.slice(dir.length).replace("\\", "/");
+      const path = entry.path.slice(dir.length).replaceAll("\\", "/");
       localFiles.push(path);
     }
 

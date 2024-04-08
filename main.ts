@@ -1,7 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
 
 import * as ini from "https://deno.land/x/ini@v2.1.0/ini.ts";
-// import { S3Client } from "https://deno.land/x/s3_lite_client@0.7.0/mod.ts";
 import { join } from "https://deno.land/std@0.221.0/path/mod.ts";
 import { sha256 } from "https://denopkg.com/chiefbiiko/sha256@v1.0.0/mod.ts";
 import { walk } from "https://deno.land/std@0.221.0/fs/walk.ts";
@@ -11,7 +10,6 @@ import {
   HeadObjectCommand,
   ListObjectsV2Command,
   ListObjectsV2CommandOutput,
-  ObjectStorageClass,
 } from "npm:@aws-sdk/client-s3";
 
 import { Command } from "https://deno.land/x/cliffy@v1.0.0-rc.3/command/mod.ts";

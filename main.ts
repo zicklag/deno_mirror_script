@@ -33,6 +33,7 @@ await new Command()
     const dirWithPrefix = prefix ? join(dir, prefix) : dir;
     let accessKey;
     let secretKey;
+    region = region || 'us-east-1'
 
     if (Deno.env.get("AWS_ACCESS_KEY_ID")) {
       accessKey = Deno.env.get("AWS_ACCESS_KEY_ID");

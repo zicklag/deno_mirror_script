@@ -26,8 +26,9 @@ await new Command()
     "Only check items in this prefix of the S3 bucket and directory."
   )
   .option("-v, --verbose", "Log info as well as well warnings.")
+  .option("-j, --json", "Output the JSON details to stdout when finished.")
   .arguments("<bucket:string> <dir:string>")
-  .action(async ({ prefix, verbose }, bucket, dir) => {
+  .action(async ({ prefix, verbose, json }, bucket, dir) => {
     let accessKey;
     let secretKey;
 
@@ -169,6 +170,8 @@ await new Command()
     console.error(`    Mismatches: ${mismatches.length}`);
     console.error(`    Missing   : ${missing.length}`);
 
-    console.log(JSON.stringify({ matches, missing, mismatches }, null, 2));
+    if (json) {
+      console.log(JSON.stringify({ matches, missing, mismatches }, null, 2));
+    }
   })
   .parse(Deno.args);

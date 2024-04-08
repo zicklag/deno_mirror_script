@@ -4,6 +4,7 @@ import * as ini from "https://deno.land/x/ini@v2.1.0/ini.ts";
 import { join } from "https://deno.land/std@0.221.0/path/mod.ts";
 import { sha256 } from "https://denopkg.com/chiefbiiko/sha256@v1.0.0/mod.ts";
 import { walk } from "https://deno.land/std@0.221.0/fs/walk.ts";
+import { normalize } from "https://deno.land/std@0.221.0/path/posix/mod.ts";
 
 import {
   S3Client,
@@ -104,7 +105,10 @@ await new Command()
     const localWalk = await walk(dirWithPrefix, { includeDirs: false });
     const localFiles: string[] = [];
     for await (const entry of localWalk) {
-      const path = entry.path.slice(dir.length).replaceAll("\\", "/");
+      let path = entry.path.slice(dir.length);
+      if (path.startsWith("/") || path.endsWith("\\")) {
+        path = path.slice(1);
+      }
       localFiles.push(path);
     }
 
@@ -115,7 +119,7 @@ await new Command()
 
     console.error(`Scanning local files...`);
     for (const path of localFiles) {
-      if (!objs.find((x) => x.Key == path)) {
+      if (!objs.find((x) => x.Key == path.replace(/\\/g, "/"))) {
         console.error(
           `    Error: file found locally that is not on S3: ${path}`
         );

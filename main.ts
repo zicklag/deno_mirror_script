@@ -25,15 +25,16 @@ await new Command()
     "-p, --prefix <prefix>",
     "Only check items in this prefix of the S3 bucket and directory."
   )
+  .option("-E, --endpoint <endpoint>", "Set the S3 endpoint to use.")
   .option("-v, --verbose", "Log info as well as well warnings.")
   .option("-R, --region <region>", "The AWS region the bucket is in.")
   .option("-j, --json", "Output the JSON details to stdout when finished.")
   .arguments("<bucket:string> <dir:string>")
-  .action(async ({ prefix, verbose, json, region }, bucket, dir) => {
+  .action(async ({ prefix, verbose, json, region, endpoint }, bucket, dir) => {
     const dirWithPrefix = prefix ? join(dir, prefix) : dir;
     let accessKey;
     let secretKey;
-    region = region || 'us-east-1'
+    region = region || "us-east-1";
 
     if (Deno.env.get("AWS_ACCESS_KEY_ID")) {
       accessKey = Deno.env.get("AWS_ACCESS_KEY_ID");
@@ -58,18 +59,15 @@ await new Command()
       Deno.exit(1);
     }
 
-    const s3client = new S3Client([
-      {
-        bucketEndpoint: bucket,
-        region,
-        useGlobalEndpoint: true,
-        followRegionRedirects: true,
-        credentials: {
-          accessKeyId: accessKey,
-          secretAccessKey: secretKey,
-        },
+    const s3client = new S3Client({
+      region,
+      endpoint,
+      followRegionRedirects: true,
+      credentials: {
+        accessKeyId: accessKey,
+        secretAccessKey: secretKey,
       },
-    ]);
+    } as any);
 
     const listObjs = async () => {
       console.error("Listing objects...");

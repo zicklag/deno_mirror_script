@@ -100,7 +100,7 @@ await new Command()
     const objs = await listObjs();
 
     console.log("Fetching object checksums...");
-    const sums = await Promise.all(
+    let sumResults = await Promise.all(
       objs.map((obj) =>
         (async () => {
           assert(obj.Key, "Missing object key");
@@ -111,17 +111,22 @@ await new Command()
               ChecksumMode: "ENABLED",
             })
           );
-          assert(
-            head.ChecksumSHA256,
-            `Missing Sha256 Checksum for object: ${head.ChecksumSHA256}`
-          );
+          if (!head.ChecksumSHA256) {
+            console.warn(
+              `Skipping object with missing Sha256 Checksum: ${head.ChecksumSHA256}`
+            );
+            return null;
+          }
           const resp = { key: obj.Key, sum: head.ChecksumSHA256 };
-
           console.log(`    ${obj.Key}: ${head.ChecksumSHA256}`);
           return resp;
         })()
       )
     );
+    const sums: { key: string; sum: string }[] = sumResults.filter(
+      (x) => !!x
+    ) as any;
+
     console.log("Fetch object sums complete.");
   })
   .parse(Deno.args);

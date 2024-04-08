@@ -25,8 +25,9 @@ await new Command()
     "-p, --prefix <prefix>",
     "Only check items in this prefix of the S3 bucket and directory."
   )
+  .option("-v, --verbose", "Log info as well as well warnings.")
   .arguments("<bucket:string> <dir:string>")
-  .action(async ({ prefix }, bucket, dir) => {
+  .action(async ({ prefix, verbose }, bucket, dir) => {
     let accessKey;
     let secretKey;
 
@@ -63,7 +64,7 @@ await new Command()
     ]);
 
     const listObjs = async () => {
-      console.log("Listing objects...");
+      console.error("Listing objects...");
       const command = new ListObjectsV2Command({
         Bucket: bucket,
         Prefix: prefix,
@@ -77,11 +78,11 @@ await new Command()
             await s3client.send(command);
           // Note: we check for a non-null size to filter out directories.
           const files = (Contents || []).filter((x) => !!x.Size);
-          console.log(`    Received batch of ${files.length} objects.`);
+          console.error(`    Received batch of ${files.length} objects.`);
           objs = [...objs, ...files];
           isTruncated = IsTruncated || false;
           if (isTruncated) {
-            console.log(`    More objects exist, fetching next batch.`);
+            console.error(`    More objects exist, fetching next batch.`);
           }
           command.input.ContinuationToken = NextContinuationToken;
         }
@@ -89,13 +90,13 @@ await new Command()
         console.error(err);
       }
 
-      console.log(`Listing objects complete: ${objs.length} objects total.`);
+      console.error(`Listing objects complete: ${objs.length} objects total.`);
       return objs;
     };
 
     const objs = await listObjs();
 
-    console.log("Fetching object checksums...");
+    console.error("Fetching object checksums...");
     const sumResults = await Promise.all(
       objs.map((obj) =>
         (async () => {
@@ -114,7 +115,9 @@ await new Command()
             return null;
           }
           const resp = { key: obj.Key, sum: head.ChecksumSHA256 };
-          console.log(`    ${head.ChecksumSHA256}: ${obj.Key}`);
+          if (verbose) {
+            console.error(`    ${head.ChecksumSHA256}: ${obj.Key}`);
+          }
           return resp;
         })()
       )
@@ -123,12 +126,12 @@ await new Command()
       (x) => !!x
     ) as any;
 
-    console.log("Fetch object sums complete.");
+    console.error("Fetch object sums complete.");
 
-    console.log("Calculating and comparing checksums...");
-    let matches = 0;
-    let missing = 0;
-    let mismatches = 0;
+    console.error("Calculating and comparing checksums...");
+    const matches: string[] = [];
+    const missing: string[] = [];
+    const mismatches: string[] = [];
     await Promise.all(
       sums.map(({ key, sum }) =>
         (async () => {
@@ -139,7 +142,7 @@ await new Command()
             await Deno.stat(path);
           } catch (_) {
             console.error(`File on S3 doesn't exist locally: ${key}`);
-            missing += 1;
+            missing.push(key);
             return;
           }
 
@@ -150,18 +153,22 @@ await new Command()
             console.error(`    Error: checksum mismatch: ${key}`);
             console.error(`           S3   : ${sum}`);
             console.error(`           Local: ${localSum}`);
-            mismatches += 1;
+            mismatches.push(key);
           } else {
-            console.log(`    Match: ${key}`);
-            matches += 1;
+            if (verbose) {
+              console.error(`    Match: ${key}`);
+            }
+            matches.push(key);
           }
         })()
       )
     );
-    console.log(`Done comparing sums.`);
-    console.log(`    Total     : ${sums.length}`);
-    console.log(`    Matches   : ${matches}`);
-    console.log(`    Mismatches: ${mismatches}`);
-    console.log(`    Missing   : ${missing}`);
+    console.error(`Done comparing sums.`);
+    console.error(`    Total     : ${sums.length}`);
+    console.error(`    Matches   : ${matches.length}`);
+    console.error(`    Mismatches: ${mismatches.length}`);
+    console.error(`    Missing   : ${missing.length}`);
+
+    console.log(JSON.stringify({ matches, missing, mismatches }, null, 2));
   })
   .parse(Deno.args);

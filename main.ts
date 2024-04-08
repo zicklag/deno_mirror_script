@@ -21,8 +21,12 @@ await new Command()
   .description(
     "Compares the checksums of an S3 bucket with the files in a local dir to make sure they are the same."
   )
+  .option(
+    "-p, --prefix <prefix>",
+    "Only check items in this prefix of the S3 bucket."
+  )
   .arguments("<bucket:string> <dir:string>")
-  .action(async (_opts, bucket, dir) => {
+  .action(async ({ prefix }, bucket, dir) => {
     let accessKey;
     let secretKey;
 
@@ -62,6 +66,7 @@ await new Command()
       console.log("Listing objects...");
       const command = new ListObjectsV2Command({
         Bucket: bucket,
+        Prefix: prefix,
       });
       let objs: ListObjectsV2CommandOutput["Contents"] = [];
 

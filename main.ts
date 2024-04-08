@@ -61,6 +61,8 @@ await new Command()
       {
         bucketEndpoint: bucket,
         region,
+        useGlobalEndpoint: true,
+        followRegionRedirects: true,
         credentials: {
           accessKeyId: accessKey,
           secretAccessKey: secretKey,

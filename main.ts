@@ -26,9 +26,10 @@ await new Command()
     "Only check items in this prefix of the S3 bucket and directory."
   )
   .option("-v, --verbose", "Log info as well as well warnings.")
+  .option("-R, --region <region>", "The AWS region the bucket is in.")
   .option("-j, --json", "Output the JSON details to stdout when finished.")
   .arguments("<bucket:string> <dir:string>")
-  .action(async ({ prefix, verbose, json }, bucket, dir) => {
+  .action(async ({ prefix, verbose, json, region }, bucket, dir) => {
     const dirWithPrefix = prefix ? join(dir, prefix) : dir;
     let accessKey;
     let secretKey;
@@ -58,6 +59,7 @@ await new Command()
 
     const s3client = new S3Client([
       {
+        region,
         credentials: {
           accessKeyId: accessKey,
           secretAccessKey: secretKey,

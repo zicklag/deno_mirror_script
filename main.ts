@@ -23,7 +23,7 @@ await new Command()
   )
   .option(
     "-p, --prefix <prefix>",
-    "Only check items in this prefix of the S3 bucket."
+    "Only check items in this prefix of the S3 bucket and directory."
   )
   .arguments("<bucket:string> <dir:string>")
   .action(async ({ prefix }, bucket, dir) => {

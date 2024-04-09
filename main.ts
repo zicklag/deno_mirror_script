@@ -2,16 +2,36 @@
 
 import * as ini from "https://deno.land/x/ini@v2.1.0/ini.ts";
 import { join } from "https://deno.land/std@0.221.0/path/mod.ts";
-import { sha256 } from "https://denopkg.com/chiefbiiko/sha256@v1.0.0/mod.ts";
+import {
+  SHA256,
+  sha256,
+} from "https://denopkg.com/chiefbiiko/sha256@v1.0.0/mod.ts";
 import { walk } from "https://deno.land/std@0.221.0/fs/walk.ts";
 import { normalize } from "https://deno.land/std@0.221.0/path/posix/mod.ts";
 
 import {
   S3Client,
-  HeadObjectCommand,
+  GetObjectAttributesCommand,
   ListObjectsV2Command,
   ListObjectsV2CommandOutput,
 } from "npm:@aws-sdk/client-s3";
+
+function concatenateUInt8Arrays(uint8arrays: Uint8Array[]): Uint8Array {
+  const totalLength = uint8arrays.reduce(
+    (total, uint8array) => total + uint8array.byteLength,
+    0
+  );
+
+  const result = new Uint8Array(totalLength);
+
+  let offset = 0;
+  uint8arrays.forEach((uint8array) => {
+    result.set(uint8array, offset);
+    offset += uint8array.byteLength;
+  });
+
+  return result;
+}
 
 import { Command } from "https://deno.land/x/cliffy@v1.0.0-rc.3/command/mod.ts";
 import { assert } from "https://deno.land/std@0.221.0/assert/assert.ts";
@@ -112,6 +132,7 @@ await new Command()
       localFiles.push(path);
     }
 
+    const missing_checksum: string[] = [];
     const matches: string[] = [];
     const mismatches: string[] = [];
     const missing_locally: string[] = [];
@@ -134,35 +155,50 @@ await new Command()
         (async () => {
           assert(obj.Key, "Missing object key");
           const head = await s3client.send(
-            new HeadObjectCommand({
+            new GetObjectAttributesCommand({
               Key: obj.Key,
               Bucket: bucket,
-              ChecksumMode: "ENABLED",
+              ObjectAttributes: ["Checksum", "ObjectParts"],
             })
           );
-          if (!head.ChecksumSHA256) {
-            console.warn(
-              `Skipping object with missing Sha256 Checksum: ${head.ChecksumSHA256}`
+
+          if (!(head.Checksum && head.Checksum.ChecksumSHA256)) {
+            console.error(
+              `    [Missing SHA256 Checksum]                   : ${obj.Key}`
             );
+            missing_checksum.push(obj.Key);
             return null;
           }
-          const resp = { key: obj.Key, sum: head.ChecksumSHA256 };
+
           if (verbose) {
-            console.error(`    ${head.ChecksumSHA256}: ${obj.Key}`);
+            console.error(`    ${head.Checksum.ChecksumSHA256}: ${obj.Key}`);
           }
-          return resp;
+
+          // If this is a multipart hash
+          if (head.ObjectParts?.Parts?.length || 0 > 0) {
+            const resp = {
+              key: obj.Key,
+              sum: head.Checksum.ChecksumSHA256,
+              multipart_sizes: head.ObjectParts?.Parts?.map(
+                (part) => part.Size
+              ),
+            };
+            return resp;
+          } else {
+            const resp = { key: obj.Key, sum: head.Checksum.ChecksumSHA256 };
+            return resp;
+          }
         })()
       )
     );
-    const sums: { key: string; sum: string }[] = sumResults.filter(
-      (x) => !!x
-    ) as any;
+    const sums: { key: string; sum: string; multipart_sizes?: number[] }[] =
+      sumResults.filter((x) => !!x) as any;
 
     console.error("Fetch object sums complete.");
 
     console.error("Calculating and comparing checksums...");
     await Promise.all(
-      sums.map(({ key, sum }) =>
+      sums.map(({ key, sum, multipart_sizes }) =>
         (async () => {
           const path = join(dir, key);
 
@@ -177,7 +213,29 @@ await new Command()
 
           // Read file and compute the sum
           const file = await Deno.readFile(path);
-          const localSum = sha256(file, undefined, "base64");
+          let localSum;
+          if (multipart_sizes) {
+            const file_size = multipart_sizes.reduce((a, c) => a + c, 0);
+            if (file_size !== file.length) {
+              localSum = "error: invalid file size";
+            } else {
+              const part_sums: Uint8Array[] = [];
+              let offset = 0;
+              for (const part_size of multipart_sizes) {
+                const slice = file.slice(offset, offset + part_size);
+                part_sums.push(sha256(slice) as any);
+                offset = offset + part_size;
+              }
+
+              localSum = sha256(
+                concatenateUInt8Arrays(part_sums),
+                undefined,
+                "base64"
+              );
+            }
+          } else {
+            localSum = sha256(file, undefined, "base64");
+          }
           if (localSum != sum) {
             console.error(`    Error: checksum mismatch: ${key}`);
             console.error(`           S3   : ${sum}`);
@@ -196,13 +254,20 @@ await new Command()
     console.error(`    Total     : ${sums.length}`);
     console.error(`    Matches   : ${matches.length}`);
     console.error(`    Mismatches: ${mismatches.length}`);
-    console.error(`    Missing Locally: ${missing_locally.length}`);
-    console.error(`    Missing on S3  : ${missing_on_s3.length}`);
+    console.error(`    Missing Checksum: ${missing_checksum.length}`);
+    console.error(`    Missing Locally : ${missing_locally.length}`);
+    console.error(`    Missing on S3   : ${missing_on_s3.length}`);
 
     if (json) {
       console.log(
         JSON.stringify(
-          { matches, missing_locally, missing_on_s3, mismatches },
+          {
+            matches,
+            missing_locally,
+            missing_on_s3,
+            mismatches,
+            missing_checksum,
+          },
           null,
           2
         )

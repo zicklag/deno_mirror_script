@@ -106,7 +106,7 @@ await new Command()
     const localFiles: string[] = [];
     for await (const entry of localWalk) {
       let path = entry.path.slice(dir.length);
-      if (path.startsWith("/") || path.endsWith("\\")) {
+      if (path.startsWith("/") || path.startsWith("\\")) {
         path = path.slice(1);
       }
       localFiles.push(path);

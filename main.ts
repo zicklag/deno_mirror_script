@@ -7,6 +7,8 @@ import {
   sha256,
 } from "https://denopkg.com/chiefbiiko/sha256@v1.0.0/mod.ts";
 import { walk } from "https://deno.land/std@0.221.0/fs/walk.ts";
+import { TextDelimiterStream } from "https://deno.land/std@0.224.0/streams/text_delimiter_stream.ts";
+
 import { normalize } from "https://deno.land/std@0.221.0/path/posix/mod.ts";
 
 import {
@@ -150,7 +152,14 @@ await new Command()
     console.log(`Done scanning local files: ${localFiles.length} files total.`);
 
     console.error("Fetching object checksums...");
-    const sumResults = await Promise.all(
+    const checksumFilePath = await Deno.makeTempFile();
+    let checksumFile = await Deno.open(checksumFilePath, {
+      create: true,
+      append: true,
+    });
+    const checksumWriter = checksumFile.writable.getWriter();
+    await checksumWriter.ready;
+    await Promise.all(
       objs.map((obj) =>
         (async () => {
           assert(obj.Key, "Missing object key");
@@ -167,91 +176,106 @@ await new Command()
               `    [Missing SHA256 Checksum]                   : ${obj.Key}`
             );
             missing_checksum.push(obj.Key);
-            return null;
+            return;
           }
 
           if (verbose) {
             console.error(`    ${head.Checksum.ChecksumSHA256}: ${obj.Key}`);
           }
 
+          let resp: { key: string; sum: string; multipart_sizes?: number[] };
+
           // If this is a multipart hash
           if (head.ObjectParts?.Parts?.length || 0 > 0) {
-            const resp = {
+            resp = {
               key: obj.Key,
               sum: head.Checksum.ChecksumSHA256,
               multipart_sizes: head.ObjectParts?.Parts?.map(
                 (part) => part.Size
-              ),
+              ) as any,
             };
-            return resp;
           } else {
-            const resp = { key: obj.Key, sum: head.Checksum.ChecksumSHA256 };
-            return resp;
+            resp = { key: obj.Key, sum: head.Checksum.ChecksumSHA256 };
           }
+
+          await checksumWriter.write(
+            new TextEncoder().encode(JSON.stringify(resp) + "\n")
+          );
         })()
       )
     );
-    const sums: { key: string; sum: string; multipart_sizes?: number[] }[] =
-      sumResults.filter((x) => !!x) as any;
+    await checksumWriter.close();
+    checksumFile = await Deno.open(checksumFilePath);
+    const checksumReader = checksumFile.readable
+      .pipeThrough(new TextDecoderStream())
+      .pipeThrough(new TextDelimiterStream("\n"));
 
     console.error("Fetch object sums complete.");
 
     console.error("Calculating and comparing checksums...");
-    await Promise.all(
-      sums.map(({ key, sum, multipart_sizes }) =>
-        (async () => {
-          const path = join(dir, key);
+    let sum_count = 0;
+    for await (const line of checksumReader.values()) {
+      if (line == '') {
+        break;
+      }
+      sum_count += 1;
+      const {
+        key,
+        sum,
+        multipart_sizes,
+      }: { key: string; sum: string; multipart_sizes?: number[] } =
+        JSON.parse(line);
+      const path = join(dir, key);
 
-          // Make sure the file exists
-          try {
-            await Deno.stat(path);
-          } catch (_) {
-            console.error(`    File on S3 doesn't exist locally: ${key}`);
-            missing_locally.push(key);
-            return;
+      // Make sure the file exists
+      try {
+        await Deno.stat(path);
+      } catch (_) {
+        console.error(`    File on S3 doesn't exist locally: ${key}`);
+        missing_locally.push(key);
+        return;
+      }
+
+      // Read file and compute the sum
+      const file = await Deno.readFile(path);
+      let localSum;
+      if (multipart_sizes) {
+        const file_size = multipart_sizes.reduce((a, c) => a + c, 0);
+        if (file_size !== file.length) {
+          localSum = "error: invalid file size";
+        } else {
+          const part_sums: Uint8Array[] = [];
+          let offset = 0;
+          for (const part_size of multipart_sizes) {
+            const slice = file.slice(offset, offset + part_size);
+            part_sums.push(sha256(slice) as any);
+            offset = offset + part_size;
           }
 
-          // Read file and compute the sum
-          const file = await Deno.readFile(path);
-          let localSum;
-          if (multipart_sizes) {
-            const file_size = multipart_sizes.reduce((a, c) => a + c, 0);
-            if (file_size !== file.length) {
-              localSum = "error: invalid file size";
-            } else {
-              const part_sums: Uint8Array[] = [];
-              let offset = 0;
-              for (const part_size of multipart_sizes) {
-                const slice = file.slice(offset, offset + part_size);
-                part_sums.push(sha256(slice) as any);
-                offset = offset + part_size;
-              }
+          localSum = sha256(
+            concatenateUInt8Arrays(part_sums),
+            undefined,
+            "base64"
+          );
+        }
+      } else {
+        localSum = sha256(file, undefined, "base64");
+      }
+      if (localSum != sum) {
+        console.error(`    Error: checksum mismatch: ${key}`);
+        console.error(`           S3   : ${sum}`);
+        console.error(`           Local: ${localSum}`);
+        mismatches.push(key);
+      } else {
+        if (verbose) {
+          console.error(`    Match: ${key}`);
+        }
+        matches.push(key);
+      }
+    }
 
-              localSum = sha256(
-                concatenateUInt8Arrays(part_sums),
-                undefined,
-                "base64"
-              );
-            }
-          } else {
-            localSum = sha256(file, undefined, "base64");
-          }
-          if (localSum != sum) {
-            console.error(`    Error: checksum mismatch: ${key}`);
-            console.error(`           S3   : ${sum}`);
-            console.error(`           Local: ${localSum}`);
-            mismatches.push(key);
-          } else {
-            if (verbose) {
-              console.error(`    Match: ${key}`);
-            }
-            matches.push(key);
-          }
-        })()
-      )
-    );
     console.error(`Done comparing sums.`);
-    console.error(`    Total     : ${sums.length}`);
+    console.error(`    Total     : ${sum_count}`);
     console.error(`    Matches   : ${matches.length}`);
     console.error(`    Mismatches: ${mismatches.length}`);
     console.error(`    Missing Checksum: ${missing_checksum.length}`);

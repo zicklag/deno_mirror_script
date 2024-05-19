@@ -2,14 +2,9 @@
 
 import * as ini from "https://deno.land/x/ini@v2.1.0/ini.ts";
 import { join } from "https://deno.land/std@0.221.0/path/mod.ts";
-import {
-  SHA256,
-  sha256,
-} from "https://denopkg.com/chiefbiiko/sha256@v1.0.0/mod.ts";
+import { sha256 } from "https://denopkg.com/chiefbiiko/sha256@v1.0.0/mod.ts";
 import { walk } from "https://deno.land/std@0.221.0/fs/walk.ts";
 import { TextDelimiterStream } from "https://deno.land/std@0.224.0/streams/text_delimiter_stream.ts";
-
-import { normalize } from "https://deno.land/std@0.221.0/path/posix/mod.ts";
 
 import {
   S3Client,
@@ -215,7 +210,7 @@ await new Command()
     console.error("Calculating and comparing checksums...");
     let sum_count = 0;
     for await (const line of checksumReader.values()) {
-      if (line == '') {
+      if (line == "") {
         break;
       }
       sum_count += 1;
